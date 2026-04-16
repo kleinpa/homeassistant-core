@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import socket
 from types import TracebackType
 from typing import Self
 
@@ -71,3 +72,34 @@ class AsyncMQTTClient(MQTTClient):
         self._in_message_mutex = NullLock()  # type: ignore[assignment]
         self._reconnect_delay_mutex = NullLock()  # type: ignore[assignment]
         self._mid_generate_mutex = NullLock()  # type: ignore[assignment]
+
+    def _create_socket_connection(self) -> socket.socket:
+        """Create a TCP connection to the broker supporting IPv6.
+
+        Overrides paho's default implementation to avoid passing
+        source_address=('', 0) when no explicit bind is configured.
+        Calling bind(('', 0)) on an IPv6 socket can fail on some
+        platforms when the hostname only resolves to IPv6 addresses.
+        """
+        proxy = self._get_proxy()
+        addr = (self._host, self._port)
+        # Only pass source_address when explicitly configured to avoid
+        # calling bind(('', 0)) on IPv6 sockets which may fail on some systems.
+        source = (
+            (self._bind_address, self._bind_port)
+            if (self._bind_address or self._bind_port)
+            else None
+        )
+
+        if proxy:
+            import socks  # noqa: PLC0415
+
+            return socks.create_connection(  # type: ignore[no-any-return]
+                addr,
+                timeout=self._connect_timeout,
+                source_address=source,
+                **proxy,
+            )
+        return socket.create_connection(
+            addr, timeout=self._connect_timeout, source_address=source
+        )

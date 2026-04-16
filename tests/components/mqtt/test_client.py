@@ -2325,3 +2325,79 @@ async def test_loop_write_failure(
 
     # Cleanup. Server is closed earlier already.
     client.close()
+
+
+def test_async_mqtt_client_create_socket_no_source_address_for_ipv6() -> None:
+    """Test _create_socket_connection passes no source_address for IPv6 connections.
+
+    When no explicit bind address is configured (the default), source_address
+    should be None so that socket.create_connection does not call bind(('', 0))
+    on the socket. This avoids failures on platforms where binding an IPv6 socket
+    to ('', 0) is not supported.
+    """
+    from homeassistant.components.mqtt.async_client import AsyncMQTTClient
+
+    client = AsyncMQTTClient(
+        callback_api_version=paho_mqtt.CallbackAPIVersion.VERSION2,
+    )
+    # Default: no explicit bind address or port configured
+    assert client._bind_address == ""
+    assert client._bind_port == 0
+
+    with patch("socket.create_connection") as mock_create_connection:
+        mock_create_connection.return_value = MagicMock()
+        client._host = "mqtt-ipv6-only.example.com"
+        client._port = 1883
+        client._create_socket_connection()
+
+    mock_create_connection.assert_called_once_with(
+        ("mqtt-ipv6-only.example.com", 1883),
+        timeout=client._connect_timeout,
+        source_address=None,
+    )
+
+
+def test_async_mqtt_client_create_socket_source_address_when_bind_address() -> None:
+    """Test _create_socket_connection passes source_address when bind is configured."""
+    from homeassistant.components.mqtt.async_client import AsyncMQTTClient
+
+    client = AsyncMQTTClient(
+        callback_api_version=paho_mqtt.CallbackAPIVersion.VERSION2,
+    )
+    client._bind_address = "192.168.1.100"
+    client._bind_port = 0
+
+    with patch("socket.create_connection") as mock_create_connection:
+        mock_create_connection.return_value = MagicMock()
+        client._host = "mqtt.example.com"
+        client._port = 1883
+        client._create_socket_connection()
+
+    mock_create_connection.assert_called_once_with(
+        ("mqtt.example.com", 1883),
+        timeout=client._connect_timeout,
+        source_address=("192.168.1.100", 0),
+    )
+
+
+def test_async_mqtt_client_create_socket_source_address_when_bind_port() -> None:
+    """Test _create_socket_connection passes source_address when bind port is configured."""
+    from homeassistant.components.mqtt.async_client import AsyncMQTTClient
+
+    client = AsyncMQTTClient(
+        callback_api_version=paho_mqtt.CallbackAPIVersion.VERSION2,
+    )
+    client._bind_address = ""
+    client._bind_port = 5000
+
+    with patch("socket.create_connection") as mock_create_connection:
+        mock_create_connection.return_value = MagicMock()
+        client._host = "mqtt.example.com"
+        client._port = 1883
+        client._create_socket_connection()
+
+    mock_create_connection.assert_called_once_with(
+        ("mqtt.example.com", 1883),
+        timeout=client._connect_timeout,
+        source_address=("", 5000),
+    )
